@@ -33,9 +33,16 @@ from pysc2.lib import point_flag
 from pysc2.lib import stopwatch
 
 import tensorflow as tf
+import time
+from tqdm import tqdm
 
-
+COUNTER = 0
 FLAGS = flags.FLAGS
+
+flags.DEFINE_float("learning_rate", 5e-4, "Learning rate for training.")
+flags.DEFINE_integer("max_steps", int(1e5), "Total steps for training.")
+flags.DEFINE_float("discount", 0.99, "Discount rate for future rewards.")
+
 flags.DEFINE_bool("render", True, "Whether to render with pygame.")
 point_flag.DEFINE_point("feature_screen_size", "84",
                         "Resolution for screen feature layers.")
@@ -81,12 +88,38 @@ flags.DEFINE_bool("save_replay", True, "Whether to save a replay at the end.")
 flags.DEFINE_string("map", None, "Name of a map to use.")
 flags.mark_flag_as_required("map")
 
+def my_run_loop(agents, env, max_frames=0):
+  """A run loop to have agents and an environment interact."""
+  start_time = time.time()
 
-def run_thread(agent_classes, players, map_name, visualize):
+  try:
+    while True:
+      num_frames = 0
+      timesteps = env.reset()
+      for a in agents:
+        a.reset()
+      while True:
+        num_frames += 1
+        last_timesteps = timesteps
+        actions = [agent.step(timestep) for agent, timestep in zip(agents, timesteps)]
+        timesteps = env.step(actions)
+        # Only for a single player!
+        is_done = (num_frames >= max_frames) or timesteps[0].last()
+        yield [last_timesteps[0], actions[0], timesteps[0]], is_done
+        if is_done:
+          break
+  except KeyboardInterrupt:
+    pass
+  finally:
+    elapsed_time = time.time() - start_time
+    print("Took %.3f seconds" % elapsed_time)
+
+
+def run_thread(agent, map_name, visualize):
   """Run one thread worth of the environment with agents."""
   with sc2_env.SC2Env(
       map_name=map_name,
-      players=players,
+      #players=players,
       agent_interface_format=sc2_env.parse_agent_interface_format(
           feature_screen=FLAGS.feature_screen_size,
           feature_minimap=FLAGS.feature_minimap_size,
@@ -99,29 +132,32 @@ def run_thread(agent_classes, players, map_name, visualize):
       disable_fog=FLAGS.disable_fog,
       visualize=visualize) as env:
     env = available_actions_printer.AvailableActionsPrinter(env)
-    agents = [agent_cls() for agent_cls in agent_classes]
 
-
-    config = tf.ConfigProto(allow_soft_placement=True)
-    config.gpu_options.allow_growth = True
-    sess = tf.Session(config=config)
-
-    agents = []
-    i = 0
-    for agent_cls in agent_classes :
-        agent = agent_cls()
-        agent.build_model(i > 0 )
-        agents.append(agent)
-        agents[i].sess(sess)
-        i += 1
-
-
-    agent.initialize()
-
-    run_loop.run_loop(agents, env, FLAGS.max_agent_steps, FLAGS.max_episodes)
+    # Only for a single player!
+    replay_buffer = []
+    for recorder, is_done in tqdm(my_run_loop([agent], env, 10000), desc="run_loop"):
+        if True or FLAGS.training:
+            replay_buffer.append(recorder)
+            if is_done:
+                counter = 0
+                with threading.Lock():
+                    global COUNTER
+                    COUNTER += 1
+                    counter = COUNTER
+                # Learning rate schedule
+                learning_rate = FLAGS.learning_rate * (1 - 0.9 * counter / FLAGS.max_steps)
+                agent.update(replay_buffer, FLAGS.discount, learning_rate, counter)
+                replay_buffer = []
+                #if counter % FLAGS.snapshot_step == 1:
+                    #agent.save_model(SNAPSHOT, counter)
+                if counter >= FLAGS.max_steps:
+                    break
+        elif is_done:
+            obs = recorder[-1].observation
+            score = obs["score_cumulative"][0]
+            print('Your score is ' + str(score) + '!')
     if FLAGS.save_replay:
-      env.save_replay(agent_classes[0].__name__)
-
+        env.save_replay(agent.name)
 
 def main(unused_argv):
   """Run an agent."""
@@ -135,6 +171,26 @@ def main(unused_argv):
 
   agent_module, agent_name = FLAGS.agent.rsplit(".", 1)
   agent_cls = getattr(importlib.import_module(agent_module), agent_name)
+
+  #summary_writer = tf.summary.FileWriter(LOG) TODO : 이것도 추가하기
+
+  agents = []
+
+  for i in range(FLAGS.parallel):
+        agent = agent_cls()
+        agent.build_model(i > 0)  # TODO : 이렇게 학습하네요
+        agents.append(agent)
+
+
+  config = tf.ConfigProto(allow_soft_placement=True)
+  config.gpu_options.allow_growth = True
+  sess = tf.Session(config=config)
+
+  for i in range(FLAGS.parallel):
+        agents[i].sess(sess)
+
+  agent.initialize()
+
   agent_classes.append(agent_cls)
   players.append(sc2_env.Agent(sc2_env.Race[FLAGS.agent_race],
                                FLAGS.agent_name or agent_name))
@@ -151,14 +207,18 @@ def main(unused_argv):
       players.append(sc2_env.Agent(sc2_env.Race[FLAGS.agent2_race],
                                    FLAGS.agent2_name or agent_name))
 
+
+
   threads = []
   for _ in range(FLAGS.parallel - 1):
     t = threading.Thread(target=run_thread,
-                         args=(agent_classes, players, FLAGS.map, False))
+                         args=(agents[i], FLAGS.map, False))
     threads.append(t)
     t.start()
 
-  run_thread(agent_classes, players, FLAGS.map, FLAGS.render)
+
+  #run_thread(agent_classes, players, FLAGS.map, FLAGS.render)
+  run_thread(agents[-1], FLAGS.map, FLAGS.render)
 
   for t in threads:
     t.join()

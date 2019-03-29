@@ -6,6 +6,8 @@ import random
 import tensorflow as tf
 import tensorflow.contrib.layers as layers
 import numpy as np
+from tqdm import tqdm
+
 
 _PLAYER_RELATIVE = features.SCREEN_FEATURES.player_relative.index
 
@@ -291,8 +293,10 @@ class ZergAgent(base_agent.BaseAgent):
 
         # Epsilon greedy exploration
         if self.training and np.random.rand() < self.epsilon[0]:
+            print("epsilon act_id on")
             act_id = np.random.choice(valid_actions)
         if self.training and np.random.rand() < self.epsilon[1]:
+            print("epsilon target on")
             dy = np.random.randint(-4, 5)
             target[0] = int(max(0, min(self.ssize - 1, target[0] + dy)))
             dx = np.random.randint(-4, 5)
@@ -300,7 +304,7 @@ class ZergAgent(base_agent.BaseAgent):
 
         # Set act_id and act_args
         act_args = []
-        act_id = 193 #TODO : 임시방편으로 역장으로 act_id를 고정
+        #act_id = 193 #TODO : 임시방편으로 역장으로 act_id를 고정
         for arg in actions.FUNCTIONS[act_id].args:
             if arg.name in ('screen', 'minimap', 'screen2'):
                 act_args.append([target[1], target[0]])
@@ -354,3 +358,82 @@ class ZergAgent(base_agent.BaseAgent):
              return actions.FUNCTIONS.select_army("select")
 
         return actions.FUNCTIONS.no_op()
+
+    def update(self, rbs, disc, lr, cter):
+        print("학습을 시작합니다!")
+        # Compute R, which is value of the last observation
+        obs = rbs[-1][-1]
+        if obs.last():
+            R = 0
+        else:
+            minimap = np.array(obs.observation.feature_minimap, dtype=np.float32)
+            minimap = np.expand_dims(preprocess_minimap(minimap), axis=0)
+            screen = np.array(obs.observation.feature_screen, dtype=np.float32)
+            screen = np.expand_dims(preprocess_screen(screen), axis=0)
+            info = np.zeros([1, self.isize], dtype=np.float32)
+            info[0, obs.observation['available_actions']] = 1
+
+            feed = {self.minimap: minimap,
+                    self.screen: screen,
+                    self.info: info}
+            R = self.sess.run(self.value, feed_dict=feed)[0]
+
+        # Compute targets and masks
+        minimaps = []
+        screens = []
+        infos = []
+
+        value_target = np.zeros([len(rbs)], dtype=np.float32)
+        value_target[-1] = R
+
+        valid_spatial_action = np.zeros([len(rbs)], dtype=np.float32)
+        spatial_action_selected = np.zeros([len(rbs), self.ssize ** 2], dtype=np.float32)
+        valid_non_spatial_action = np.zeros([len(rbs), len(actions.FUNCTIONS)], dtype=np.float32)
+        non_spatial_action_selected = np.zeros([len(rbs), len(actions.FUNCTIONS)], dtype=np.float32)
+
+        rbs.reverse()
+        for i, [obs, action, next_obs] in tqdm(enumerate(rbs)):
+            minimap = np.array(obs.observation.feature_minimap, dtype=np.float32)
+            minimap = np.expand_dims(preprocess_minimap(minimap), axis=0)
+            screen = np.array(obs.observation.feature_screen, dtype=np.float32)
+            screen = np.expand_dims(preprocess_screen(screen), axis=0)
+            info = np.zeros([1, self.isize], dtype=np.float32)
+            info[0, obs.observation['available_actions']] = 1
+
+            minimaps.append(minimap)
+            screens.append(screen)
+            infos.append(info)
+
+            reward = obs.reward
+            act_id = action.function
+            act_args = action.arguments
+
+            value_target[i] = reward + disc * value_target[i - 1]
+
+            valid_actions = obs.observation["available_actions"]
+            valid_non_spatial_action[i, valid_actions] = 1
+            non_spatial_action_selected[i, act_id] = 1
+
+            args = actions.FUNCTIONS[act_id].args
+            for arg, act_arg in zip(args, act_args):
+                if arg.name in ('screen', 'minimap', 'screen2'):
+                    ind = act_arg[1] * self.ssize + act_arg[0]
+                    valid_spatial_action[i] = 1
+                    spatial_action_selected[i, ind] = 1
+
+        minimaps = np.concatenate(minimaps, axis=0)
+        screens = np.concatenate(screens, axis=0)
+        infos = np.concatenate(infos, axis=0)
+
+        # Train
+        feed = {self.minimap: minimaps,
+                self.screen: screens,
+                self.info: infos,
+                self.value_target: value_target,
+                self.valid_spatial_action: valid_spatial_action,
+                self.spatial_action_selected: spatial_action_selected,
+                self.valid_non_spatial_action: valid_non_spatial_action,
+                self.non_spatial_action_selected: non_spatial_action_selected,
+                self.learning_rate: lr}
+        _, summary = self.sess.run([self.train_op, self.summary_op], feed_dict=feed)
+        #self.summary_writer.add_summary(summary, cter)
