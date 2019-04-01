@@ -17,6 +17,13 @@ _MINIMAP_PLAYER_ID = features.MINIMAP_FEATURES.player_id.index
 _SCREEN_PLAYER_ID = features.SCREEN_FEATURES.player_id.index
 _SCREEN_UNIT_TYPE = features.SCREEN_FEATURES.unit_type.index
 
+#action_list = [actions.FUNCTIONS.no_op.id, actions.FUNCTIONS.Attack_screen.id, actions.FUNCTIONS.Move_screen.id, actions.FUNCTIONS.HoldPosition_quick.id]
+#[0, 12, 331, 274, 193]
+
+#_MOVE_CAMERA = actions.FUNCTIONS.move_camera.id
+#_SELECT_POINT = actions.FUNCTIONS.select_point.id
+
+action_list = [0, 12, 331, 274, 193]
 
 def preprocess_minimap(minimap):
   layers = []
@@ -34,7 +41,6 @@ def preprocess_minimap(minimap):
       layers.append(layer)
   return np.concatenate(layers, axis=0)
 
-
 def preprocess_screen(screen):
   layers = []
   assert screen.shape[0] == len(features.SCREEN_FEATURES)
@@ -51,7 +57,6 @@ def preprocess_screen(screen):
       layers.append(layer)
   return np.concatenate(layers, axis=0)
 
-
 def minimap_channel():
   c = 0
   for i in range(len(features.MINIMAP_FEATURES)):
@@ -62,7 +67,6 @@ def minimap_channel():
     else:
       c += features.MINIMAP_FEATURES[i].scale
   return c
-
 
 def screen_channel():
   c = 0
@@ -283,9 +287,12 @@ class ZergAgent(base_agent.BaseAgent):
 
         spatial_action = spatial_action.ravel()
         print("spatial_action : ", spatial_action)
-        valid_actions = obs.observation['available_actions']
+        #valid_actions = obs.observation['available_actions'] #[0, 12, 331, 274, 193]
+        valid_actions = np.array(action_list)
+        print("## valid_action : ", valid_actions)
 
         act_id = valid_actions[np.argmax(non_spatial_action[valid_actions])]
+        print("act_id : ", act_id)
         target = np.argmax(spatial_action)
         print("target : ", target)
         target = [int(target // self.ssize), int(target % self.ssize)]
@@ -392,7 +399,7 @@ class ZergAgent(base_agent.BaseAgent):
         non_spatial_action_selected = np.zeros([len(rbs), len(actions.FUNCTIONS)], dtype=np.float32)
 
         rbs.reverse()
-        for i, [obs, action, next_obs] in tqdm(enumerate(rbs)):
+        for i, [obs, action, next_obs] in enumerate(tqdm(rbs)):
             minimap = np.array(obs.observation.feature_minimap, dtype=np.float32)
             minimap = np.expand_dims(preprocess_minimap(minimap), axis=0)
             screen = np.array(obs.observation.feature_screen, dtype=np.float32)
@@ -410,7 +417,7 @@ class ZergAgent(base_agent.BaseAgent):
 
             value_target[i] = reward + disc * value_target[i - 1]
 
-            valid_actions = obs.observation["available_actions"]
+            valid_actions = np.array(action_list)#obs.observation["available_actions"]
             valid_non_spatial_action[i, valid_actions] = 1
             non_spatial_action_selected[i, act_id] = 1
 
@@ -437,3 +444,12 @@ class ZergAgent(base_agent.BaseAgent):
                 self.learning_rate: lr}
         _, summary = self.sess.run([self.train_op, self.summary_op], feed_dict=feed)
         #self.summary_writer.add_summary(summary, cter)
+
+    def save_model(self, path, count):
+        self.saver.save(self.sess, path+'/model.pkl', count)
+
+
+    def load_model(self, path):
+        ckpt = tf.train.get_checkpoint_state(path)
+        self.saver.restore(self.sess, ckpt.model_checkpoint_path)
+        return int(ckpt.model_checkpoint_path.split('-')[-1])

@@ -39,6 +39,10 @@ from tqdm import tqdm
 COUNTER = 0
 FLAGS = flags.FLAGS
 
+
+flags.DEFINE_bool("training", True, "Whether to train agents.")
+flags.DEFINE_bool("continuation", False, "Continuously training.") #TODO : 이거 키면 학습 불러옴
+
 flags.DEFINE_float("learning_rate", 5e-4, "Learning rate for training.")
 flags.DEFINE_integer("max_steps", int(1e5), "Total steps for training.")
 flags.DEFINE_float("discount", 0.99, "Discount rate for future rewards.")
@@ -135,7 +139,7 @@ def run_thread(agent, map_name, visualize):
 
     # Only for a single player!
     replay_buffer = []
-    for recorder, is_done in tqdm(my_run_loop([agent], env, 10000), desc="run_loop"):
+    for recorder, is_done in my_run_loop([agent], env, 10000):
         if True or FLAGS.training:
             replay_buffer.append(recorder)
             if is_done:
@@ -148,8 +152,8 @@ def run_thread(agent, map_name, visualize):
                 learning_rate = FLAGS.learning_rate * (1 - 0.9 * counter / FLAGS.max_steps)
                 agent.update(replay_buffer, FLAGS.discount, learning_rate, counter)
                 replay_buffer = []
-                #if counter % FLAGS.snapshot_step == 1:
-                    #agent.save_model(SNAPSHOT, counter)
+                if counter % 1000 == 1:
+                    agent.save_model("./snapshot/", counter)
                 if counter >= FLAGS.max_steps:
                     break
         elif is_done:
@@ -190,6 +194,9 @@ def main(unused_argv):
         agents[i].sess(sess)
 
   agent.initialize()
+  if not FLAGS.training or FLAGS.continuation:
+    global COUNTER
+    COUNTER = agent.load_model("./snapshot/")
 
   agent_classes.append(agent_cls)
   players.append(sc2_env.Agent(sc2_env.Race[FLAGS.agent_race],
