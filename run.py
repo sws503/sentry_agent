@@ -34,6 +34,7 @@ from pysc2.lib import stopwatch
 
 import tensorflow as tf
 import time
+import os
 from tqdm import tqdm
 
 COUNTER = 0
@@ -91,6 +92,11 @@ flags.DEFINE_bool("save_replay", True, "Whether to save a replay at the end.")
 
 flags.DEFINE_string("map", None, "Name of a map to use.")
 flags.mark_flag_as_required("map")
+
+LOG = './log/'
+if not os.path.exists(LOG):
+  os.makedirs(LOG)
+
 
 def my_run_loop(agents, env, max_frames=0):
   """A run loop to have agents and an environment interact."""
@@ -190,8 +196,11 @@ def main(unused_argv):
   config.gpu_options.allow_growth = True
   sess = tf.Session(config=config)
 
+
+
+  summary_writer = tf.summary.FileWriter(LOG)
   for i in range(FLAGS.parallel):
-        agents[i].sess(sess)
+        agents[i].sess(sess, summary_writer)
 
   agent.initialize()
   if not FLAGS.training or FLAGS.continuation:

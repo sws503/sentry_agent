@@ -80,7 +80,7 @@ def screen_channel():
   return c
 
 
-
+initial_eps = [0.8, 1.0]
 
 class ZergAgent(base_agent.BaseAgent):
     def __init__(self):
@@ -96,6 +96,10 @@ class ZergAgent(base_agent.BaseAgent):
         self.ssize = 84
         self.isize = len(actions.FUNCTIONS)
 
+        self.epsilon_a = 0
+        self.epsilon_b = 0
+        #self.epsilon = [0.8, 1.0] #initial_eps
+
         #self.msize = 64 # 미니맵 사이즈 - agent에서 관장
         #self.ssize = 84 # 스크린 사이즈 - agent에서 관장
         #self.isize = len(actions.FUNCTIONS)
@@ -105,9 +109,9 @@ class ZergAgent(base_agent.BaseAgent):
         self.obs_spec = obs_spec
         self.action_spec = action_spec
 
-    def sess(self, sess):
+    def sess(self, sess, summary_writer):
         self.sess = sess
-        #self.summary_writer = summary_writer
+        self.summary_writer = summary_writer
 
     def initialize(self):
         init_op = tf.global_variables_initializer()
@@ -115,7 +119,16 @@ class ZergAgent(base_agent.BaseAgent):
 
     def reset(self):
         # Epsilon schedule
-        self.epsilon = [0.05, 0.2]
+        if self.epsilon_a > 0.1:
+            self.epsilon_a -= 0.0005
+
+        if self.epsilon_b > 0.2:
+            self.epsilon_b -= 0.001
+
+        print("epsilon a : ", self.epsilon_a, ", b : ", self.epsilon_b)
+
+
+        #self.epsilon = [a, b]
 
     def build_net(self, minimap, screen, info, msize, ssize, num_action):
         mconv1 = layers.conv2d(tf.transpose(minimap, [0, 2, 3, 1]),
@@ -286,28 +299,29 @@ class ZergAgent(base_agent.BaseAgent):
         non_spatial_action = non_spatial_action.ravel()
 
         spatial_action = spatial_action.ravel()
-        print("spatial_action : ", spatial_action)
+        #print("spatial_action : ", spatial_action)
         #valid_actions = obs.observation['available_actions'] #[0, 12, 331, 274, 193]
         valid_actions = np.array(action_list)
-        print("## valid_action : ", valid_actions)
+        #print("## valid_action : ", valid_actions)
 
         act_id = valid_actions[np.argmax(non_spatial_action[valid_actions])]
-        print("act_id : ", act_id)
+        #print("act_id : ", act_id)
         target = np.argmax(spatial_action)
-        print("target : ", target)
+        #print("target : ", target)
         target = [int(target // self.ssize), int(target % self.ssize)]
-        print("target : ", target)
+        #print("target : ", target)
 
         # Epsilon greedy exploration
-        if self.training and np.random.rand() < self.epsilon[0]:
-            print("epsilon act_id on")
+        if self.training and np.random.rand() < self.epsilon_a:
+            #print("epsilon act_id on - current epsilon : ", self.epsilon_a)
+            #print("epsilon act_id on")
             act_id = np.random.choice(valid_actions)
-        if self.training and np.random.rand() < self.epsilon[1]:
-            print("epsilon target on")
-            dy = np.random.randint(-4, 5)
-            target[0] = int(max(0, min(self.ssize - 1, target[0] + dy)))
-            dx = np.random.randint(-4, 5)
-            target[1] = int(max(0, min(self.ssize - 1, target[1] + dx)))
+        if self.training and np.random.rand() < self.epsilon_b:
+            #print("epsilon target on - current epsilon : ", self.epsilon_b)
+            dy = np.random.randint(10, 50)
+            target[0] = int(max(0, min(self.ssize - 1, dy)))
+            dx = np.random.randint(20, 60)
+            target[1] = int(max(0, min(self.ssize - 1, dx)))
 
         # Set act_id and act_args
         act_args = []
@@ -344,8 +358,8 @@ class ZergAgent(base_agent.BaseAgent):
             #TODO : target을 학습시키는 agent를 만드는 것이 목표
             #return actions.FUNCTIONS.Effect_ForceField_screen("now", target)
 
-            print("제가 고른 act_id는 ", act_id)
-            print("제가 고른 act_args는 ", act_args)
+            #print("제가 고른 act_id는 ", act_id)
+            #print("제가 고른 act_args는 ", act_args)
             return actions.FunctionCall(act_id, act_args)
             #return actions.FUNCTIONS.no_op()
 
@@ -443,7 +457,7 @@ class ZergAgent(base_agent.BaseAgent):
                 self.non_spatial_action_selected: non_spatial_action_selected,
                 self.learning_rate: lr}
         _, summary = self.sess.run([self.train_op, self.summary_op], feed_dict=feed)
-        #self.summary_writer.add_summary(summary, cter)
+        self.summary_writer.add_summary(summary, cter)
 
     def save_model(self, path, count):
         self.saver.save(self.sess, path+'/model.pkl', count)
