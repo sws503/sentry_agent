@@ -2,8 +2,7 @@
 for graduation
 
 ### Map
-![Alt text](/path/to/img.jpg)
-
+![Alt text](/path/DefeatRoaches.png)
 
 ### Requirements  
 ```
