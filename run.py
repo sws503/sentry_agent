@@ -35,6 +35,7 @@ from pysc2.lib import stopwatch
 import tensorflow as tf
 import time
 import os
+import sys
 from tqdm import tqdm
 
 COUNTER = 0
@@ -43,6 +44,7 @@ FLAGS = flags.FLAGS
 
 flags.DEFINE_bool("training", True, "Whether to train agents.")
 flags.DEFINE_bool("continuation", False, "Continuously training.") #TODO : 이거 키면 학습 불러옴
+flags.DEFINE_string("device", "0", "Device for training.")
 
 flags.DEFINE_float("learning_rate", 5e-4, "Learning rate for training.")
 flags.DEFINE_integer("max_steps", int(1e5), "Total steps for training.")
@@ -94,6 +96,17 @@ flags.DEFINE_string("map", None, "Name of a map to use.")
 flags.mark_flag_as_required("map")
 
 LOG = './log/'
+
+FLAGS(sys.argv)
+if FLAGS.training:
+  PARALLEL = FLAGS.parallel
+  MAX_AGENT_STEPS = FLAGS.max_agent_steps
+  DEVICE = ['/cpu:'+ dev for dev in FLAGS.device.split(',')]
+else:
+  PARALLEL = 1
+  MAX_AGENT_STEPS = 1e5
+  DEVICE = ['/cpu:0']
+
 if not os.path.exists(LOG):
   os.makedirs(LOG)
 
@@ -146,9 +159,12 @@ def run_thread(agent, map_name, visualize):
     # Only for a single player!
     replay_buffer = []
     for recorder, is_done in my_run_loop([agent], env, 10000):
-        if True or FLAGS.training:
+        if FLAGS.training:
             replay_buffer.append(recorder)
             if is_done:
+                #obs = recorder[-1].observation
+                #score = obs["score_cumulative"][0]
+
                 counter = 0
                 with threading.Lock():
                     global COUNTER
@@ -158,7 +174,7 @@ def run_thread(agent, map_name, visualize):
                 learning_rate = FLAGS.learning_rate * (1 - 0.9 * counter / FLAGS.max_steps)
                 agent.update(replay_buffer, FLAGS.discount, learning_rate, counter)
                 replay_buffer = []
-                if counter % 1000 == 1:
+                if counter % 200 == 1:
                     agent.save_model("./snapshot/", counter)
                 if counter >= FLAGS.max_steps:
                     break
@@ -186,9 +202,9 @@ def main(unused_argv):
 
   agents = []
 
-  for i in range(FLAGS.parallel):
-        agent = agent_cls()
-        agent.build_model(i > 0)  # TODO : 이렇게 학습하네요
+  for i in range(PARALLEL):
+        agent = agent_cls(FLAGS.training)
+        agent.build_model(i > 0, DEVICE[i % len(DEVICE)])  # TODO : 이렇게 학습하네요
         agents.append(agent)
 
 
@@ -199,7 +215,7 @@ def main(unused_argv):
 
 
   summary_writer = tf.summary.FileWriter(LOG)
-  for i in range(FLAGS.parallel):
+  for i in range(PARALLEL):
         agents[i].sess(sess, summary_writer)
 
   agent.initialize()
@@ -226,7 +242,7 @@ def main(unused_argv):
 
 
   threads = []
-  for _ in range(FLAGS.parallel - 1):
+  for _ in range(PARALLEL - 1):
     t = threading.Thread(target=run_thread,
                          args=(agents[i], FLAGS.map, False))
     threads.append(t)

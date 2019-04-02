@@ -83,11 +83,11 @@ def screen_channel():
 initial_eps = [0.8, 1.0]
 
 class ZergAgent(base_agent.BaseAgent):
-    def __init__(self):
+    def __init__(self, training):
         super(ZergAgent, self).__init__()
 
         #self.name = name
-        self.training = True
+        self.training = training
         self.summary = []
         # Minimap size, screen size and info size
         #assert msize == ssize
@@ -96,8 +96,8 @@ class ZergAgent(base_agent.BaseAgent):
         self.ssize = 84
         self.isize = len(actions.FUNCTIONS)
 
-        self.epsilon_a = 0
-        self.epsilon_b = 0
+        self.epsilon_a = 0.8
+        self.epsilon_b = 1.0
         #self.epsilon = [0.8, 1.0] #initial_eps
 
         #self.msize = 64 # 미니맵 사이즈 - agent에서 관장
@@ -189,8 +189,8 @@ class ZergAgent(base_agent.BaseAgent):
 
         return spatial_action, non_spatial_action, value
 
-    def build_model(self, reuse):
-        with tf.device('/cpu:0'):
+    def build_model(self, reuse, dev):
+        with tf.variable_scope('Sentry_agent') and tf.device(dev):
             if reuse:
                 tf.get_variable_scope().reuse_variables()
                 assert tf.get_variable_scope().reuse
@@ -244,7 +244,7 @@ class ZergAgent(base_agent.BaseAgent):
             opt = tf.train.RMSPropOptimizer(self.learning_rate, decay=0.99, epsilon=1e-10)
             grads = opt.compute_gradients(loss)
             cliped_grad = []
-            for grad, var in grads:
+            for grad, var in grads: #gradient, variable pair
                 self.summary.append(tf.summary.histogram(var.op.name, var))
                 self.summary.append(tf.summary.histogram(var.op.name + '/grad', grad))
                 grad = tf.clip_by_norm(grad, 10.0)
@@ -425,11 +425,15 @@ class ZergAgent(base_agent.BaseAgent):
             screens.append(screen)
             infos.append(info)
 
-            reward = obs.reward
+            score = obs.observation["score_cumulative"][0]
+            print("score는 ", score)
+            #reward = obs.reward
+            #print("reward는 ", reward)
             act_id = action.function
             act_args = action.arguments
 
-            value_target[i] = reward + disc * value_target[i - 1]
+            value_target[i] = score + disc * value_target[i - 1]
+            #value_target[i] = reward + disc * value_target[i - 1]
 
             valid_actions = np.array(action_list)#obs.observation["available_actions"]
             valid_non_spatial_action[i, valid_actions] = 1
@@ -464,6 +468,7 @@ class ZergAgent(base_agent.BaseAgent):
 
 
     def load_model(self, path):
+        print("모델을 불러옵니다!")
         ckpt = tf.train.get_checkpoint_state(path)
         self.saver.restore(self.sess, ckpt.model_checkpoint_path)
         return int(ckpt.model_checkpoint_path.split('-')[-1])
