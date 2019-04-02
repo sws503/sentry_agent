@@ -11,8 +11,8 @@ tqdm
 
 ### How to run  
 
-- To enjoy it
+- To enjoy it  
 ```python -m run --map DefeatRoaches --agent a3c_sentry_agent.ZergAgent --continuation True```  
 
-- To train it
+- To train it  
 ```python -m run --map DefeatRoaches --agent a3c_sentry_agent.ZergAgent --train True --continuation True --parallel 8 ```
