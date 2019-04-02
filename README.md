@@ -12,10 +12,10 @@ for graduation
 | score | 10        |    440         |
 
 ### TODO
-[] 학습이 잘되는지 파악할 수 있게 디버그모드 만들기
-[] training 모드, enjoy 모드 만들기
-[x] 가능한 action을 역장, no_op, move, attack, stop, hold로 한정짓기
-[x] 학습결과 그래프로 출력하기
+- [ ] 학습이 잘되는지 파악할 수 있게 디버그모드 만들기
+- [ ] training 모드, enjoy 모드 만들기
+- [x] 가능한 action을 역장, no_op, move, attack, stop, hold로 한정짓기
+- [x] 학습결과 그래프로 출력하기
 
 ### Requirements  
 ```
