@@ -23,7 +23,7 @@ _SCREEN_UNIT_TYPE = features.SCREEN_FEATURES.unit_type.index
 #_MOVE_CAMERA = actions.FUNCTIONS.move_camera.id
 #_SELECT_POINT = actions.FUNCTIONS.select_point.id
 
-action_list = [0, 12, 331, 274, 193]
+action_list = [193]
 
 def preprocess_minimap(minimap):
   layers = []
@@ -119,13 +119,13 @@ class ZergAgent(base_agent.BaseAgent):
 
     def reset(self):
         # Epsilon schedule
-        if self.epsilon_a > 0.1:
-            self.epsilon_a -= 0.0005
+        #if self.epsilon_a > 0.001:
+            #self.epsilon_a -= 0.001
 
-        if self.epsilon_b > 0.2:
-            self.epsilon_b -= 0.001
-
-        print("epsilon a : ", self.epsilon_a, ", b : ", self.epsilon_b)
+        if self.epsilon_b > 0.05:
+            self.epsilon_b -= 0.0005
+        print("epsilon b : ", self.epsilon_b)
+        #print("epsilon a : ", self.epsilon_a, "\n b : ", self.epsilon_b)
 
 
         #self.epsilon = [a, b]
@@ -333,8 +333,6 @@ class ZergAgent(base_agent.BaseAgent):
                 act_args.append([0])  # TODO: Be careful
         return act_id, act_args
 
-
-
     def step(self, obs):
         super(ZergAgent, self).step(obs)
 
@@ -426,7 +424,7 @@ class ZergAgent(base_agent.BaseAgent):
             infos.append(info)
 
             score = obs.observation["score_cumulative"][0]
-            print("score는 ", score)
+            #print("score는 ", score)
             #reward = obs.reward
             #print("reward는 ", reward)
             act_id = action.function

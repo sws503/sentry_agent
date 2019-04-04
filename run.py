@@ -174,7 +174,8 @@ def run_thread(agent, map_name, visualize):
                 learning_rate = FLAGS.learning_rate * (1 - 0.9 * counter / FLAGS.max_steps)
                 agent.update(replay_buffer, FLAGS.discount, learning_rate, counter)
                 replay_buffer = []
-                if counter % 200 == 1:
+                print("현재 counter : ", counter)
+                if counter % 249 == 1:
                     agent.save_model("./snapshot/", counter)
                 if counter >= FLAGS.max_steps:
                     break
