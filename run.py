@@ -36,6 +36,7 @@ import tensorflow as tf
 import time
 import os
 import sys
+import csv
 from tqdm import tqdm
 
 COUNTER = 0
@@ -158,18 +159,26 @@ def run_thread(agent, map_name, visualize):
 
     # Only for a single player!
     replay_buffer = []
+    score_list = []
+
     for recorder, is_done in my_run_loop([agent], env, 10000):
         if FLAGS.training:
             replay_buffer.append(recorder)
             if is_done:
-                #obs = recorder[-1].observation
-                #score = obs["score_cumulative"][0]
-
                 counter = 0
                 with threading.Lock():
                     global COUNTER
                     COUNTER += 1
                     counter = COUNTER
+                obs = recorder[-1].observation
+                score = obs["score_cumulative"][0]
+                score_list.append(score)
+
+                with open('test.csv', 'w', encoding='utf-8', newline='') as files:
+                    writer = csv.writer(files, delimiter=',')
+                    for i in range(len(score_list)) :
+                        writer.writerow([i, score_list[i]])
+
                 # Learning rate schedule
                 learning_rate = FLAGS.learning_rate * (1 - 0.9 * counter / FLAGS.max_steps)
                 agent.update(replay_buffer, FLAGS.discount, learning_rate, counter)
