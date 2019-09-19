@@ -7,8 +7,9 @@ import tensorflow as tf
 import tensorflow.contrib.layers as layers
 import numpy as np
 from tqdm import tqdm
-import math
 
+import sys
+np.set_printoptions(threshold=sys.maxsize)
 
 _PLAYER_RELATIVE = features.SCREEN_FEATURES.player_relative.index
 
@@ -24,7 +25,7 @@ _SCREEN_UNIT_TYPE = features.SCREEN_FEATURES.unit_type.index
 #_MOVE_CAMERA = actions.FUNCTIONS.move_camera.id
 #_SELECT_POINT = actions.FUNCTIONS.select_point.id
 
-action_list = [193]
+action_list = [193, 218]
 
 def preprocess_minimap(minimap):
   layers = []
@@ -97,8 +98,8 @@ class ZergAgent(base_agent.BaseAgent):
         self.ssize = 84
         self.isize = len(actions.FUNCTIONS)
 
-        self.epsilon_a = 0.8
-        self.epsilon_b = 0.0#1.0
+        self.epsilon_a = 0.5
+        self.epsilon_b = 1.0
         #self.epsilon = [0.8, 1.0] #initial_eps
 
         #self.msize = 64 # 미니맵 사이즈 - agent에서 관장
@@ -123,7 +124,7 @@ class ZergAgent(base_agent.BaseAgent):
         #if self.epsilon_a > 0.001:
             #self.epsilon_a -= 0.001
 
-        if self.epsilon_b > 0.05:
+        if self.epsilon_b > 0.01 :
             self.epsilon_b -= 0.0005
         print("epsilon b : ", self.epsilon_b)
         #print("epsilon a : ", self.epsilon_a, "\n b : ", self.epsilon_b)
@@ -229,6 +230,7 @@ class ZergAgent(base_agent.BaseAgent):
             self.summary.append(tf.summary.histogram('non_spatial_action_prob', non_spatial_action_prob))
 
             # Compute losses, more details in https://arxiv.org/abs/1602.01783
+
             # Policy loss and value loss
             action_log_prob = self.valid_spatial_action * spatial_action_log_prob + non_spatial_action_log_prob
             advantage = tf.stop_gradient(self.value_target - self.value)
@@ -286,9 +288,6 @@ class ZergAgent(base_agent.BaseAgent):
         info = np.zeros([1, self.isize], dtype=np.float32)
         info[0, obs.observation['available_actions']] = 1
 
-        #print("minimap",minimap)
-        #print("screen",screen)
-
         feed = {self.minimap: minimap,
                 self.screen: screen,
                 self.info: info}
@@ -300,29 +299,22 @@ class ZergAgent(base_agent.BaseAgent):
         non_spatial_action = non_spatial_action.ravel()
 
         spatial_action = spatial_action.ravel()
-        #print("spatial_action : ", spatial_action)
-        #valid_actions = obs.observation['available_actions'] #[0, 12, 331, 274, 193]
         valid_actions = np.array(action_list)
-        #print("## valid_action : ", valid_actions)
 
         act_id = valid_actions[np.argmax(non_spatial_action[valid_actions])]
-        #print("act_id : ", act_id)
         target = np.argmax(spatial_action)
-        #print("target : ", target)
         target = [int(target // self.ssize), int(target % self.ssize)]
-        #print("target : ", target)
 
         # Epsilon greedy exploration
         if self.training and np.random.rand() < self.epsilon_a:
-            #print("epsilon act_id on - current epsilon : ", self.epsilon_a)
-            #print("epsilon act_id on")
             act_id = np.random.choice(valid_actions)
         if self.training and np.random.rand() < self.epsilon_b:
-            #print("epsilon target on - current epsilon : ", self.epsilon_b)
             dy = np.random.randint(10, 50)
             target[0] = int(max(0, min(self.ssize - 1, dy)))
             dx = np.random.randint(20, 60)
             target[1] = int(max(0, min(self.ssize - 1, dx)))
+        else :
+            print('greedy target x: {}, y: {}'.format(target[1], target[0]))
 
         # Set act_id and act_args
         act_args = []
@@ -334,62 +326,40 @@ class ZergAgent(base_agent.BaseAgent):
                 act_args.append([0])  # TODO: Be careful
         return act_id, act_args
 
-    def gettarget(self, targets):
-        pass
-
     def step(self, obs):
         super(ZergAgent, self).step(obs)
 
+        armies = [unit for unit in obs.observation.feature_units
+                  if unit.alliance == features.PlayerRelative.SELF]
+        enemies = [unit for unit in obs.observation.feature_units
+                   if unit.alliance == features.PlayerRelative.ENEMY]
 
-        if obs.first():
-            player_y, player_x = (obs.observation.feature_minimap.player_relative ==
-                                  features.PlayerRelative.SELF).nonzero()
-            xmean = player_x.mean()
-            ymean = player_y.mean()
+        if self.can_do(obs, actions.FUNCTIONS.Attack_screen.id):
+            for army in armies:
+                if army.energy >=50 :
+                    act_id, act_args = self.step_run(obs)
 
-        roaches = self.get_units_by_type(obs, units.Zerg.Roach)
-        hydralisks = self.get_units_by_type(obs, units.Zerg.Hydralisk)
-        zerglings = self.get_units_by_type(obs, units.Zerg.Zergling)
-        Sentries = self.get_units_by_type(obs, units.Protoss.Sentry)
+                    if self.can_do(obs, actions.FUNCTIONS.Effect_ForceField_screen.id):
+                        return actions.FunctionCall(193, act_args)
 
-        if self.can_do(obs, actions.FUNCTIONS.Effect_ForceField_screen.id):
-            act_id, act_args = self.step_run(obs)
-            #TODO : 지금은 무조건 역장으로
-            #screen = self.ssize
-            #target = [random.randint(0, screen),random.randint(0, screen)]
-            #TODO : target을 학습시키는 agent를 만드는 것이 목표
-            #return actions.FUNCTIONS.Effect_ForceField_screen("now", target)
+                    if self.can_do(obs, actions.FUNCTIONS.Effect_PsiStorm_screen.id):
+                        return actions.FunctionCall(218, act_args)
 
-            #print("제가 고른 act_id는 ", act_id)
-            #print("제가 고른 act_args는 ", act_args)
-            return actions.FunctionCall(act_id, act_args)
-            #return actions.FUNCTIONS.no_op()
 
-        elif self.can_do(obs, actions.FUNCTIONS.Attack_screen.id) :
 
-            if len(roaches)>0:
-                enemy = random.choice(roaches)
-                return actions.FUNCTIONS.Attack_screen("queued", (enemy.x, enemy.y))
+                    '''if act_id == 218:
+                        if self.can_do(obs, actions.FUNCTIONS.Effect_PsiStorm_screen.id):
+                            # TODO : 지금은 무조건 역장으로
+                            return actions.FunctionCall(act_id, act_args)
 
-            elif len(zerglings)>0:
-                enemy = random.choice(zerglings)
-                return actions.FUNCTIONS.Attack_screen("queued", (enemy.x, enemy.y))
-            else :
-                #return actions.FUNCTIONS.Attack_minimap("queued", (0, 32))
-                return actions.FUNCTIONS.no_op()
-            #return actions.FUNCTIONS.Attack_minimap("queued", (0, 32))
-            #return actions.FUNCTIONS.Attack_minimap("queued",(enemy.x, enemy.y))
-                #ISSUE : Attack_minimap이 불가능한 상황에서 명령을 실행함
+                    elif act_id == 193:
+                        if self.can_do(obs, actions.FUNCTIONS.Effect_ForceField_screen.id):
+                            return actions.FunctionCall(act_id, act_args)'''
 
         elif self.can_do(obs, actions.FUNCTIONS.select_army.id) :
              return actions.FUNCTIONS.select_army("select")
 
         return actions.FUNCTIONS.no_op()
-
-    def Distance2D(self, myunit, targetunit):
-        dx = myunit.x - targetunit.x
-        dy = myunit.y - targetunit.y
-        return math.sqrt((dx * dx) + (dy * dy))
 
     def update(self, rbs, disc, lr, cter):
         print("학습을 시작합니다!")
