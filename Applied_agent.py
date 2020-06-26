@@ -25,7 +25,7 @@ _SCREEN_UNIT_TYPE = features.SCREEN_FEATURES.unit_type.index
 #_MOVE_CAMERA = actions.FUNCTIONS.move_camera.id
 #_SELECT_POINT = actions.FUNCTIONS.select_point.id
 
-action_list = [193, 218]
+action_list = [193]
 
 def preprocess_minimap(minimap):
   layers = []
@@ -101,6 +101,11 @@ class ZergAgent(base_agent.BaseAgent):
         self.epsilon_a = 0.5
         self.epsilon_b = 1.0
         #self.epsilon = [0.8, 1.0] #initial_eps
+        self.spatial_list = []
+        self.x = 0
+        self.y = 0
+        self.first = 0
+        self.direction = []
 
         #self.msize = 64 # 미니맵 사이즈 - agent에서 관장
         #self.ssize = 84 # 스크린 사이즈 - agent에서 관장
@@ -124,8 +129,10 @@ class ZergAgent(base_agent.BaseAgent):
         #if self.epsilon_a > 0.001:
             #self.epsilon_a -= 0.001
 
-        if self.epsilon_b > 0.01 :
-            self.epsilon_b -= 0.0005
+        self.first = 0
+
+        '''if self.epsilon_b > 0.01 :
+            self.epsilon_b -= 0.0005'''
         print("epsilon b : ", self.epsilon_b)
         #print("epsilon a : ", self.epsilon_a, "\n b : ", self.epsilon_b)
 
@@ -188,6 +195,7 @@ class ZergAgent(base_agent.BaseAgent):
                                                   num_outputs=1,
                                                   activation_fn=None,
                                                   scope='value'), [-1])
+
         return spatial_action, non_spatial_action, value
 
     def build_model(self, reuse, dev):
@@ -203,11 +211,8 @@ class ZergAgent(base_agent.BaseAgent):
             self.info = tf.placeholder(tf.float32, [None, self.isize], name='info')
 
             # Build networks
-            net1 = self.build_net(self.minimap, self.screen, self.info, self.msize, self.ssize, len(actions.FUNCTIONS))
-            self.spatial_action1, self.non_spatial_action1, self.value1 = net1
-
-            net2 = self.build_net(self.minimap, self.screen, self.info, self.msize, self.ssize, len(actions.FUNCTIONS))
-            self.spatial_action2, self.non_spatial_action2, self.value2 = net2
+            net = self.build_net(self.minimap, self.screen, self.info, self.msize, self.ssize, len(actions.FUNCTIONS))
+            self.spatial_action, self.non_spatial_action, self.value = net
 
             # Set targets and masks
             self.valid_spatial_action = tf.placeholder(tf.float32, [None], name='valid_spatial_action')
@@ -232,6 +237,7 @@ class ZergAgent(base_agent.BaseAgent):
             self.summary.append(tf.summary.histogram('non_spatial_action_prob', non_spatial_action_prob))
 
             # Compute losses, more details in https://arxiv.org/abs/1602.01783
+
             # Policy loss and value loss
             action_log_prob = self.valid_spatial_action * spatial_action_log_prob + non_spatial_action_log_prob
             advantage = tf.stop_gradient(self.value_target - self.value)
@@ -280,6 +286,9 @@ class ZergAgent(base_agent.BaseAgent):
     def can_do(self, obs, action):
         return action in obs.observation.available_actions
 
+    def get_spatial_list(self):
+        return self.spatial_list
+
     def step_run(self, obs):
         minimap = np.array(obs.observation.feature_minimap, dtype=np.float32)
         minimap = np.expand_dims(preprocess_minimap(minimap), axis=0)
@@ -301,6 +310,11 @@ class ZergAgent(base_agent.BaseAgent):
 
         spatial_action = spatial_action.ravel()
         valid_actions = np.array(action_list)
+
+        self.spatial_list = spatial_action
+
+        #print(spatial_action)
+        #print(" ")
 
         act_id = valid_actions[np.argmax(non_spatial_action[valid_actions])]
         target = np.argmax(spatial_action)
@@ -335,27 +349,39 @@ class ZergAgent(base_agent.BaseAgent):
         enemies = [unit for unit in obs.observation.feature_units
                    if unit.alliance == features.PlayerRelative.ENEMY]
 
-        if self.can_do(obs, actions.FUNCTIONS.Attack_screen.id):
-            for army in armies:
-                if army.energy >=50 :
-                    act_id, act_args = self.step_run(obs)
+        if self.first == 0:
+            act_id, act_args = self.step_run(obs)
+            self.first = 1
+            self.x = act_args[1][0]
+            self.y = act_args[1][1]
+            self.direction = act_args.copy()
+            print("direction : ", self.direction)
+            psi_grid = [[0], [self.direction[1][0] + 2, self.direction[1][1]]]
+            print("psi direction : ", psi_grid)
 
-                    if self.can_do(obs, actions.FUNCTIONS.Effect_ForceField_screen.id):
-                        return actions.FunctionCall(193, act_args)
+        elif self.first == 1:
+            grid = (self.x, self.y)
 
-                    if self.can_do(obs, actions.FUNCTIONS.Effect_PsiStorm_screen.id):
-                        return actions.FunctionCall(218, act_args)
+            if self.can_do(obs, actions.FUNCTIONS.Attack_screen.id):
+                for army in armies:
+                    if self.can_do(obs, actions.FUNCTIONS.Effect_PsiStorm_screen.id) and army.energy >= 75 :
+                        #act_id, act_args = self.step_run(obs)
+                        psi_grid = [[0], [self.direction[1][0] + 3, self.direction[1][1]]]
+                        return actions.FunctionCall(218, psi_grid)
 
+                    elif self.can_do(obs, actions.FUNCTIONS.Effect_ForceField_screen.id) and army.energy >= 50 :
+                        #act_id, act_args = self.step_run(obs)
 
+                        return actions.FunctionCall(193, self.direction)
 
-                    '''if act_id == 218:
-                        if self.can_do(obs, actions.FUNCTIONS.Effect_PsiStorm_screen.id):
-                            # TODO : 지금은 무조건 역장으로
-                            return actions.FunctionCall(act_id, act_args)
+                    elif self.can_do(obs, actions.FUNCTIONS.Attack_screen.id) and len(enemies) > 0:
+                        enemy = random.choice(enemies)
+                        # return actions.FUNCTIONS.Attack_minimap("queued", (0, 32))
+                        return actions.FUNCTIONS.Attack_minimap("queued", (55, 25))#(enemy.x, enemy.y))
 
-                    elif act_id == 193:
-                        if self.can_do(obs, actions.FUNCTIONS.Effect_ForceField_screen.id):
-                            return actions.FunctionCall(act_id, act_args)'''
+                    else:
+                        print("error occur")
+                        return actions.FUNCTIONS.no_op()
 
         elif self.can_do(obs, actions.FUNCTIONS.select_army.id) :
              return actions.FUNCTIONS.select_army("select")
